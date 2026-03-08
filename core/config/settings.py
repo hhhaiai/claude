@@ -1,7 +1,10 @@
 """
 统一的 YAML 配置加载。
 
-默认读取项目根目录下的 config.yaml；若设置 WEB2API_CONFIG_PATH，则优先读取该路径。
+优先级：
+1. WEB2API_CONFIG_PATH 指定的路径
+2. 项目根目录下的 config.local.yaml
+3. 项目根目录下的 config.yaml
 """
 
 from __future__ import annotations
@@ -15,13 +18,18 @@ import yaml
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _CONFIG_ENV_KEY = "WEB2API_CONFIG_PATH"
+_LOCAL_CONFIG_NAME = "config.local.yaml"
+_DEFAULT_CONFIG_NAME = "config.yaml"
 
 
 def _resolve_config_path() -> Path:
     configured = os.environ.get(_CONFIG_ENV_KEY, "").strip()
     if configured:
         return Path(configured).expanduser()
-    return _PROJECT_ROOT / "config.yaml"
+    local_config = _PROJECT_ROOT / _LOCAL_CONFIG_NAME
+    if local_config.exists():
+        return local_config
+    return _PROJECT_ROOT / _DEFAULT_CONFIG_NAME
 
 
 _CONFIG_PATH = _resolve_config_path()
@@ -29,8 +37,17 @@ _CONFIG_PATH = _resolve_config_path()
 _config_cache: dict[str, Any] | None = None
 
 
+def get_config_path() -> Path:
+    return _CONFIG_PATH
+
+
+def reset_cache() -> None:
+    global _config_cache
+    _config_cache = None
+
+
 def load_config() -> dict[str, Any]:
-    """加载根目录下的 config.yaml，不存在时返回空 dict。"""
+    """按优先级加载配置文件，不存在时返回空 dict。"""
     global _config_cache
     if _config_cache is not None:
         return _config_cache

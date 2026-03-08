@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from core.api.auth import require_api_key
 from core.api.chat_handler import ChatHandler
 from core.plugin.base import PluginRegistry
 from core.api.function_call import build_tool_calls_response
@@ -41,7 +42,7 @@ def get_chat_handler(request: Request) -> ChatHandler:
 
 def create_router() -> APIRouter:
     """创建 v1 兼容路由，路径为 /{type}/v1/..."""
-    router = APIRouter()
+    router = APIRouter(dependencies=[Depends(require_api_key)])
 
     @router.get("/{type}/v1/models")
     def list_models(type: str) -> dict[str, Any]:
