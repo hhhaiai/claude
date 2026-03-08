@@ -6,9 +6,21 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from pydantic import BaseModel
 
+from core.api.auth import (
+    ADMIN_SESSION_COOKIE,
+    admin_logged_in,
+    check_admin_login_rate_limit,
+    configured_config_secret_hash,
+    record_admin_login_failure,
+    record_admin_login_success,
+    require_config_login,
+    require_config_login_enabled,
+    verify_config_secret,
+)
 from core.api.chat_handler import ChatHandler
 from core.config.repository import ConfigRepository
 from core.plugin.base import PluginRegistry
@@ -18,16 +30,22 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
+class AdminLoginRequest(BaseModel):
+    secret: str
+
+
 def create_config_router() -> APIRouter:
     router = APIRouter()
 
     @router.get("/api/types")
-    def get_types() -> list[str]:
+    def get_types(_: None = Depends(require_config_login)) -> list[str]:
         """返回已注册的 type 列表，供配置页 type 下拉使用。"""
         return PluginRegistry.all_types()
 
     @router.get("/api/config")
-    def get_config(request: Request) -> list[dict[str, Any]]:
+    def get_config(
+        request: Request, _: None = Depends(require_config_login)
+    ) -> list[dict[str, Any]]:
         """获取配置（代理组 + 账号 name/type/auth）。"""
         repo: ConfigRepository | None = getattr(request.app.state, "config_repo", None)
         if repo is None:
@@ -36,7 +54,9 @@ def create_config_router() -> APIRouter:
 
     @router.put("/api/config")
     async def put_config(
-        request: Request, config: list[dict[str, Any]]
+        request: Request,
+        config: list[dict[str, Any]],
+        _: None = Depends(require_config_login),
     ) -> dict[str, Any]:
         """更新配置并立即生效。"""
         repo: ConfigRepository | None = getattr(request.app.state, "config_repo", None)
@@ -90,7 +110,9 @@ def create_config_router() -> APIRouter:
         # 立即生效：重新加载池并替换 chat_handler
         try:
             groups = repo.load_groups()
-            handler: ChatHandler | None = getattr(request.app.state, "chat_handler", None)
+            handler: ChatHandler | None = getattr(
+                request.app.state, "chat_handler", None
+            )
             if handler is None:
                 raise RuntimeError("chat_handler 未初始化")
             await handler.refresh_configuration(groups, config_repo=repo)
@@ -101,9 +123,61 @@ def create_config_router() -> APIRouter:
             ) from e
         return {"status": "ok", "message": "配置已保存并生效"}
 
-    @router.get("/config")
-    def config_page() -> FileResponse:
+    @router.get("/login", response_model=None)
+    def login_page(request: Request) -> FileResponse | RedirectResponse:
+        require_config_login_enabled()
+        if admin_logged_in(request):
+            return RedirectResponse(url="/config", status_code=302)
+        path = STATIC_DIR / "login.html"
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="登录页未就绪")
+        return FileResponse(path)
+
+    @router.post("/api/admin/login", response_model=None)
+    def admin_login(payload: AdminLoginRequest, request: Request) -> Response:
+        require_config_login_enabled()
+        check_admin_login_rate_limit(request)
+        secret = payload.secret.strip()
+        encoded = configured_config_secret_hash()
+        if not secret or not encoded or not verify_config_secret(secret, encoded):
+            lock_seconds = record_admin_login_failure(request)
+            if lock_seconds > 0:
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"登录失败次数过多，请 {lock_seconds} 秒后再试",
+                )
+            raise HTTPException(status_code=401, detail="登录失败，secret 不正确")
+        record_admin_login_success(request)
+        store = request.app.state.admin_sessions
+        token = store.create()
+        response = JSONResponse({"status": "ok"})
+        response.set_cookie(
+            key=ADMIN_SESSION_COOKIE,
+            value=token,
+            httponly=True,
+            samesite="lax",
+            secure=request.url.scheme == "https",
+            max_age=store.ttl_seconds,
+            path="/",
+        )
+        return response
+
+    @router.post("/api/admin/logout", response_model=None)
+    def admin_logout(request: Request) -> Response:
+        token = (request.cookies.get(ADMIN_SESSION_COOKIE) or "").strip()
+        store = getattr(request.app.state, "admin_sessions", None)
+        if store is not None:
+            store.revoke(token)
+        response = JSONResponse({"status": "ok"})
+        response.delete_cookie(ADMIN_SESSION_COOKIE, path="/")
+        return response
+
+    @router.get("/config", response_model=None)
+    def config_page(request: Request) -> FileResponse | RedirectResponse:
         """配置页入口。"""
+        require_config_login_enabled()
+        if not admin_logged_in(request):
+            return RedirectResponse(url="/login", status_code=302)
         path = STATIC_DIR / "config.html"
         if not path.is_file():
             raise HTTPException(status_code=404, detail="配置页未就绪")

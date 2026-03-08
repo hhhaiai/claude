@@ -44,3 +44,4 @@ proxy-auth-extension/
 
 db.sqlite3
 docker-data/
+config.local.yaml

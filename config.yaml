@@ -4,6 +4,29 @@ server:
   host: '127.0.0.1'
   port: 9000
 
+auth:
+  # 对外 API 鉴权开关：留空表示不启用；填写后，所有 /{type}/v1/* 请求都必须带匹配的 API Key。
+  # 推荐客户端使用：
+  #   Authorization: Bearer <api_key>
+  # 支持三种写法：
+  #   api_key: "key-1"
+  #   api_key: "key-1,key-2"
+  #   api_key:
+  #     - "key-1"
+  #     - "key-2"
+  # 仅保护 OpenAI 兼容接口，不用于配置页登录。
+  # 修改后需要重启服务生效。
+  api_key: ''
+
+  # 配置页登录密钥：留空表示不启用配置页；填写明文后，项目启动时会自动转换成哈希并回写到当前 config.yaml。
+  # 之后访问 /config 时，需要先到 /login 输入这里最初配置的明文 secret。
+  # 修改 secret 的方式：把这里重新改成新的明文，再重启服务；启动后会再次自动哈希。
+  # 注意：如果未配置 config_secret，/config 与 /api/config 将不可访问。
+  config_secret: ''
+  # 配置页登录失败保护：按来源 IP 统计，连续失败达到阈值后临时锁定。
+  config_login_max_failures: 5
+  config_login_lock_seconds: 600
+
 browser:
   # 指纹浏览器（fingerprint-chromium）可执行文件路径
   # 留空则使用默认值：macOS /Applications/Chromium.app/Contents/MacOS/Chromium

@@ -2,6 +2,16 @@ server:
   host: '0.0.0.0'
   port: 9000
 
+auth:
+  # 留空表示不启用 API Key；如果填写，所有 /{type}/v1/* 请求都要带匹配的 Key。
+  # 支持单个字符串、逗号分隔字符串或 YAML 列表。
+  api_key: ''
+
+  # 留空表示不启用配置页；填写明文后，首次启动会自动转换成哈希并回写到 /data/config.yaml。
+  config_secret: ''
+  config_login_max_failures: 5
+  config_login_lock_seconds: 600
+
 browser:
   # 容器内 fingerprint-chromium 的固定路径
   chromium_bin: '/opt/fingerprint-chromium/chrome'

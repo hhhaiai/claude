@@ -272,6 +272,7 @@
       <button type="button" class="btn btn-primary" id="addGroup">添加代理组</button>
       <button type="button" class="btn btn-ghost" id="load">重新加载</button>
       <button type="button" class="btn btn-primary" id="save">保存配置</button>
+      <button type="button" class="btn btn-ghost" id="logout">退出登录</button>
     </div>
     <div class="search-row">
       <label>搜索（代理 host/user 或账号 name / type）</label>
@@ -352,9 +353,18 @@
         ].sort()
       })()
 
+      async function apiFetch(url, options = {}) {
+        const res = await fetch(url, options)
+        if (res.status === 401) {
+          window.location.href = '/login'
+          throw new Error('登录已失效，请重新登录')
+        }
+        return res
+      }
+
       async function loadTypes() {
         try {
-          const res = await fetch(TYPES_API)
+          const res = await apiFetch(TYPES_API)
           if (res.ok) {
             const list = await res.json()
             if (Array.isArray(list) && list.length) registeredTypes = list
@@ -373,7 +383,7 @@
       }
 
       async function loadConfig() {
-        const res = await fetch(API)
+        const res = await apiFetch(API)
         if (!res.ok) throw new Error(await res.text())
         return res.json()
       }
@@ -768,7 +778,7 @@
           return
         }
         try {
-          const res = await fetch(API, {
+          const res = await apiFetch(API, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(toSave),
@@ -781,6 +791,12 @@
         } catch (e) {
           showMsg('保存失败: ' + e.message, 'error')
         }
+      }
+      document.getElementById('logout').onclick = async () => {
+        try {
+          await fetch('/api/admin/logout', { method: 'POST' })
+        } catch (_) {}
+        window.location.href = '/login'
       }
 
       let searchDebounce
